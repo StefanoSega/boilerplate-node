@@ -7,7 +7,7 @@ export const Users = mongoose.model(
     {
       email: { type: String, required: true },
       password: { type: String, required: true },
-      name: { type: String },
+      name: { type: String, required: true },
     },
     {
       methods: {

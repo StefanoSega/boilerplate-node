@@ -7,4 +7,12 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - "./db/data:/data/db"
+      - "./db/mongo/data:/data/db"
+  cache:
+    image: redis:6.2-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --save 20 1 --loglevel warning --requirepass eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+    volumes:
+      - "./db/cache/data:/data"
