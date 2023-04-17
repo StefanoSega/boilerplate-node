@@ -1,7 +1,13 @@
-import { Express } from "express";
+import express, { Express } from "express";
 
-import { router as authRoutes } from "./auth";
+import { AuthRoutes } from "./auth";
+import { UsersRepository } from "~/db/repositories/usersRepository";
 
 export const applyRoutes = (app: Express) => {
-  app.use("/auth", authRoutes);
+  const router = express.Router();
+  const usersRepository = new UsersRepository();
+
+  new AuthRoutes(usersRepository).attachToRouter(router);
+
+  app.use("/auth", router);
 };

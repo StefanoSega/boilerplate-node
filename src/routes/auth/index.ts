@@ -1,190 +1,172 @@
 import express from "express";
-import jwt from "jsonwebtoken";
-import { check, validationResult } from "express-validator";
-import omit from "lodash/omit";
-import bcrypt from "bcrypt";
 import passport from "passport";
 
-import { Users } from "~/model";
-import cache from "~/cache";
-import { config } from "~/config";
+import {
+  emailValidator,
+  existsValidator,
+  passwordValidator,
+} from "../validators";
+import { getValidationErrors } from "~/routes/routesHelpers";
+import { UsersRepository } from "~/db/repositories/usersRepository";
+import { hashingHelpers } from "~/helpers/hashingHelpers";
+import { authService } from "~/auth/authService";
 
-const router = express.Router();
+export class AuthRoutes {
+  private readonly usersRepository: UsersRepository;
 
-router.post(
-  "/login",
-  [
-    check("email")
-      .exists()
-      .withMessage("EMAIL_IS_EMPTY")
-      .isEmail()
-      .withMessage("EMAIL_IS_IN_WRONG_FORMAT"),
-    check("password")
-      .exists()
-      .withMessage("PASSWORD_IS_EMPTY")
-      .isLength({ min: 8 })
-      .withMessage("PASSWORD_LENGTH_MUST_BE_MORE_THAN_8"),
-  ],
-  async (req, res) => {
-    const errorsAfterValidation = validationResult(req);
-    if (!errorsAfterValidation.isEmpty()) {
-      return res.status(400).json({
-        code: 400,
-        errors: errorsAfterValidation.mapped(),
-      });
-    }
-
-    try {
-      const { email, password } = req.body;
-      const user = await Users.findOne({ email });
-
-      if (!user?.email) {
-        return res.status(401).json({
-          code: 401,
-          errors: { email: "User or password not valid" },
-        });
-      }
-
-      const isPasswordMatched = await user.isPasswordEqual(password);
-      if (!isPasswordMatched) {
-        return res.status(403).json({
-          code: 401,
-          errors: { email: "User or password not valid" },
-        });
-      }
-
-      // Sign token
-      const userData = omit(user.toJSON(), "password");
-      const token = jwt.sign({ email }, config.auth.jwtSecret, {
-        expiresIn: 1000000,
-      });
-      const refreshTokenExp = 1000 * 60 * 60 * 24 * 30;
-      const refreshToken = jwt.sign({ email }, config.auth.jwtSecret, {
-        expiresIn: refreshTokenExp,
-      });
-
-      await cache.set(
-        `user:${email}:refreshToken`,
-        refreshToken,
-        refreshTokenExp
-      );
-
-      res.status(200).json({
-        ...userData,
-        token,
-        refreshToken,
-      });
-    } catch (exc) {
-      return res.status(500).json({
-        code: 500,
-        errors: { email: exc },
-      });
-    }
+  constructor(usersRepository: UsersRepository) {
+    this.usersRepository = usersRepository;
   }
-);
 
-router.post(
-  "/token/refresh",
-  [check("refreshToken").exists().withMessage("REFRESHTOKEN_IS_EMPTY")],
-  passport.authenticate("jwt"),
-  async (req, res) => {
-    const errorsAfterValidation = validationResult(req);
-    if (!errorsAfterValidation.isEmpty()) {
-      return res.status(400).json({
-        code: 400,
-        errors: errorsAfterValidation.mapped(),
-      });
-    }
+  attachToRouter(router: express.Router) {
+    router.post(
+      "/login",
+      [emailValidator("email"), passwordValidator("password")],
+      async (req, res) => {
+        const errorsAfterValidation = getValidationErrors(req);
+        if (errorsAfterValidation) {
+          return res.status(400).json({
+            code: 400,
+            errors: errorsAfterValidation,
+          });
+        }
 
-    try {
-      const { refreshToken } = req.body;
-      const email = "zwonimir@live.it"; // todo: take from JWT
+        try {
+          const { email, password } = req.body;
+          const user = await this.usersRepository.getByEmail(email);
 
-      const cachedRefreshToken = await cache.get(`user:${email}:refreshToken`);
-      if (refreshToken !== cachedRefreshToken) {
-        return res.status(400).json({
-          code: 400,
-          errors: "Invalid refresh token",
-        });
+          if (!user?.email) {
+            return res.status(401).json({
+              code: 401,
+              errors: { email: "User or password not valid" },
+            });
+          }
+
+          const isPasswordMatched = await hashingHelpers.isHashingEqual(
+            password,
+            user.password
+          );
+          if (!isPasswordMatched) {
+            return res.status(403).json({
+              code: 401,
+              errors: { email: "User or password not valid" },
+            });
+          }
+
+          const token = authService.generateAccessToken(user);
+          const refreshToken = authService.generateRefreshToken(user);
+
+          res.status(200).json({
+            ...user,
+            token,
+            refreshToken,
+          });
+        } catch (exc) {
+          return res.status(500).json({
+            code: 500,
+            errors: { email: exc },
+          });
+        }
       }
+    );
 
-      // todo: how to invalidate previous token?
-      const token = jwt.sign({ email }, config.auth.jwtSecret, {
-        expiresIn: 1000000,
-      });
+    router.post(
+      "/token/refresh",
+      [existsValidator("refreshToken", "REFRESHTOKEN_IS_EMPTY")],
+      passport.authenticate("jwt"),
+      async (req, res) => {
+        const errorsAfterValidation = getValidationErrors(req);
+        if (errorsAfterValidation) {
+          return res.status(400).json({
+            code: 400,
+            errors: errorsAfterValidation,
+          });
+        }
 
-      res.status(200).json({
-        email,
-        token,
-        refreshToken,
-      });
-    } catch (exc) {
-      return res.status(500).json({
-        code: 500,
-        errors: { email: exc },
-      });
-    }
-  }
-);
+        try {
+          const { refreshToken } = req.body;
 
-router.post(
-  "/register",
-  [
-    check("email")
-      .exists()
-      .withMessage("EMAIL_IS_EMPTY")
-      .isEmail()
-      .withMessage("EMAIL_IS_IN_WRONG_FORMAT"),
-    check("password")
-      .exists()
-      .withMessage("PASSWORD_IS_EMPTY")
-      .isLength({ min: 8 })
-      .withMessage("PASSWORD_LENGTH_MUST_BE_MORE_THAN_8"),
-    check("name").exists().withMessage("EMAIL_IS_EMPTY"),
-  ],
-  async (req, res) => {
-    const errorsAfterValidation = validationResult(req);
-    if (!errorsAfterValidation.isEmpty()) {
-      res.status(400).json({
-        code: 400,
-        errors: errorsAfterValidation.mapped(),
-      });
-    }
+          const refreshTokenPayload = await authService.getTokenPayload(
+            refreshToken
+          );
+          const cachedRefreshToken = await authService.getRefreshToken(
+            refreshTokenPayload
+          );
+          if (refreshToken !== cachedRefreshToken) {
+            return res.status(400).json({
+              code: 400,
+              errors: "Invalid refresh token",
+            });
+          }
 
-    try {
-      const { email, password, name } = req.body;
+          const token = authService.generateAccessToken(refreshTokenPayload);
+          const user = {
+            email: refreshTokenPayload.email,
+            name: refreshTokenPayload.name,
+          };
 
-      const user = await Users.findOne({ email });
-      if (user) {
-        return res.status(403).json({
-          code: 409,
-          errors: { email: "User with this email already exists" },
-        });
+          res.status(200).json({
+            ...user,
+            token,
+            refreshToken,
+          });
+        } catch (exc) {
+          return res.status(500).json({
+            code: 500,
+            errors: { email: exc },
+          });
+        }
       }
+    );
 
-      const passwordEncrypted = await bcrypt.hash(password, 10);
-      const newUser = await Users.create({
-        email,
-        password: passwordEncrypted,
-        name,
-      });
+    router.post(
+      "/register",
+      [
+        emailValidator("email"),
+        passwordValidator("password"),
+        existsValidator("name", "NAME_IS_EMPTY"),
+      ],
+      async (req, res) => {
+        const errorsAfterValidation = getValidationErrors(req);
+        if (errorsAfterValidation) {
+          return res.status(400).json({
+            code: 400,
+            errors: errorsAfterValidation,
+          });
+        }
 
-      // Sign token
-      const userData = omit(newUser.toJSON(), "password");
-      const token = jwt.sign({ email }, config.auth.jwtSecret, {
-        expiresIn: 1000000,
-      });
-      res.status(200).json({
-        ...userData,
-        token,
-      });
-    } catch (exc) {
-      return res.status(500).json({
-        code: 500,
-        ...exc,
-      });
-    }
+        try {
+          const { email, password, name } = req.body;
+
+          const user = await this.usersRepository.getByEmail(email);
+          if (user) {
+            return res.status(403).json({
+              code: 409,
+              errors: { email: "User with this email already exists" },
+            });
+          }
+
+          const passwordEncrypted = await hashingHelpers.hash(password);
+          const newUser = {
+            email,
+            password: passwordEncrypted,
+            name,
+          };
+          await this.usersRepository.create(newUser);
+
+          const token = authService.generateAccessToken(newUser);
+
+          res.status(200).json({
+            ...newUser,
+            token,
+          });
+        } catch (exc) {
+          return res.status(500).json({
+            code: 500,
+            ...exc,
+          });
+        }
+      }
+    );
   }
-);
-
-export { router };
+}
