@@ -10,6 +10,7 @@ import { getValidationErrors } from "~/routes/routesHelpers";
 import { UsersRepository } from "~/db/repositories/usersRepository";
 import { hashingHelpers } from "~/helpers/hashingHelpers";
 import { authService } from "~/auth/authService";
+import { ResponseType, getJsonResponse } from "../responseHelpers";
 
 export class AuthRoutes {
   private readonly usersRepository: UsersRepository;
@@ -25,10 +26,11 @@ export class AuthRoutes {
       async (req, res) => {
         const errorsAfterValidation = getValidationErrors(req);
         if (errorsAfterValidation) {
-          return res.status(400).json({
-            code: 400,
-            errors: errorsAfterValidation,
-          });
+          return getJsonResponse(
+            res,
+            ResponseType.BadRequest,
+            errorsAfterValidation
+          );
         }
 
         try {
@@ -36,9 +38,8 @@ export class AuthRoutes {
           const user = await this.usersRepository.getByEmail(email);
 
           if (!user?.email) {
-            return res.status(401).json({
-              code: 401,
-              errors: { email: "User or password not valid" },
+            return getJsonResponse(res, ResponseType.Unauthorized, {
+              email: "User or password not valid",
             });
           }
 
@@ -47,24 +48,22 @@ export class AuthRoutes {
             user.password
           );
           if (!isPasswordMatched) {
-            return res.status(403).json({
-              code: 401,
-              errors: { email: "User or password not valid" },
+            return getJsonResponse(res, ResponseType.Unauthorized, {
+              email: "User or password not valid",
             });
           }
 
-          const token = authService.generateAccessToken(user);
-          const refreshToken = authService.generateRefreshToken(user);
+          const token = await authService.generateAccessToken(user);
+          const refreshToken = await authService.generateRefreshToken(user);
 
-          res.status(200).json({
+          return getJsonResponse(res, ResponseType.Success, {
             ...user,
             token,
             refreshToken,
           });
         } catch (exc) {
-          return res.status(500).json({
-            code: 500,
-            errors: { email: exc },
+          return getJsonResponse(res, ResponseType.InternalServerError, {
+            error: exc,
           });
         }
       }
@@ -73,14 +72,15 @@ export class AuthRoutes {
     router.post(
       "/token/refresh",
       [existsValidator("refreshToken", "REFRESHTOKEN_IS_EMPTY")],
-      passport.authenticate("jwt"),
+      passport.authenticate("jwt", { session: false }),
       async (req, res) => {
         const errorsAfterValidation = getValidationErrors(req);
         if (errorsAfterValidation) {
-          return res.status(400).json({
-            code: 400,
-            errors: errorsAfterValidation,
-          });
+          return getJsonResponse(
+            res,
+            ResponseType.BadRequest,
+            errorsAfterValidation
+          );
         }
 
         try {
@@ -90,30 +90,30 @@ export class AuthRoutes {
             refreshToken
           );
           const cachedRefreshToken = await authService.getRefreshToken(
-            refreshTokenPayload
+            refreshTokenPayload.email
           );
           if (refreshToken !== cachedRefreshToken) {
-            return res.status(400).json({
-              code: 400,
-              errors: "Invalid refresh token",
+            return getJsonResponse(res, ResponseType.BadRequest, {
+              error: "Invalid refresh token",
             });
           }
 
-          const token = authService.generateAccessToken(refreshTokenPayload);
+          const token = await authService.generateAccessToken(
+            refreshTokenPayload
+          );
           const user = {
             email: refreshTokenPayload.email,
             name: refreshTokenPayload.name,
           };
 
-          res.status(200).json({
+          return getJsonResponse(res, ResponseType.Success, {
             ...user,
             token,
             refreshToken,
           });
         } catch (exc) {
-          return res.status(500).json({
-            code: 500,
-            errors: { email: exc },
+          return getJsonResponse(res, ResponseType.InternalServerError, {
+            error: exc,
           });
         }
       }
@@ -129,10 +129,11 @@ export class AuthRoutes {
       async (req, res) => {
         const errorsAfterValidation = getValidationErrors(req);
         if (errorsAfterValidation) {
-          return res.status(400).json({
-            code: 400,
-            errors: errorsAfterValidation,
-          });
+          return getJsonResponse(
+            res,
+            ResponseType.BadRequest,
+            errorsAfterValidation
+          );
         }
 
         try {
@@ -140,9 +141,8 @@ export class AuthRoutes {
 
           const user = await this.usersRepository.getByEmail(email);
           if (user) {
-            return res.status(403).json({
-              code: 409,
-              errors: { email: "User with this email already exists" },
+            return getJsonResponse(res, ResponseType.Conflict, {
+              email: "User with this email already exists",
             });
           }
 
@@ -154,16 +154,15 @@ export class AuthRoutes {
           };
           await this.usersRepository.create(newUser);
 
-          const token = authService.generateAccessToken(newUser);
+          const token = await authService.generateAccessToken(newUser);
 
-          res.status(200).json({
+          return getJsonResponse(res, ResponseType.Success, {
             ...newUser,
             token,
           });
         } catch (exc) {
-          return res.status(500).json({
-            code: 500,
-            ...exc,
+          return getJsonResponse(res, ResponseType.InternalServerError, {
+            error: exc,
           });
         }
       }

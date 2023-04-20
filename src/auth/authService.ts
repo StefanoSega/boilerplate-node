@@ -22,7 +22,7 @@ const getTokenKey = (email: string, type: TokenType) =>
   `user:${email}:${tokenTypeMap[type]}`;
 
 const getAccessToken = async (user: Partial<User>) =>
-  await cacheService.get(getTokenKey(user.email, TokenType.RefreshToken));
+  await cacheService.get(getTokenKey(user.email, TokenType.AccessToken));
 
 class AuthService {
   private readonly usersRepository: UsersRepository;
@@ -39,7 +39,7 @@ class AuthService {
           jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
           secretOrKey: authConfig.jwtSecret,
         },
-        async ({ email, exp }, done) => {
+        async ({ email, exp, iat }, done) => {
           const isTokenExpired = new Date(exp * 1000) < new Date();
           if (isTokenExpired) {
             return done(null, false);
@@ -47,7 +47,7 @@ class AuthService {
 
           const accessToken = await getAccessToken({ email });
           const accessTokenPayload = await this.getTokenPayload(accessToken);
-          const isTokenCanceled = exp !== accessTokenPayload.exp;
+          const isTokenCanceled = iat !== accessTokenPayload.iat;
           if (isTokenCanceled) {
             return done(null, false);
           }
@@ -68,16 +68,16 @@ class AuthService {
   }
 
   async generateAccessToken(user: Partial<User>) {
-    const userData = omit(user, "password");
+    const userData = omit(user, ["password", "exp", "jti", "iat"]);
 
     const token = jwt.sign(userData, authConfig.jwtSecret, {
-      expiresIn: authConfig.accessTokenExpiresIn,
+      expiresIn: authConfig.accessTokenExpiresInMs,
     });
 
     await cacheService.set(
       getTokenKey(userData.email, TokenType.AccessToken),
       token,
-      authConfig.accessTokenExpiresIn
+      authConfig.accessTokenExpiresInMs
     );
 
     return token;
@@ -87,29 +87,29 @@ class AuthService {
     const userData = omit(user, "password");
 
     const token = jwt.sign(userData, authConfig.jwtSecret, {
-      expiresIn: authConfig.refreshTokenExpiresIn,
+      expiresIn: authConfig.refreshTokenExpiresInMs,
     });
 
     await cacheService.set(
       getTokenKey(userData.email, TokenType.RefreshToken),
       token,
-      authConfig.refreshTokenExpiresIn
+      authConfig.refreshTokenExpiresInMs
     );
 
     return token;
   }
 
-  async getRefreshToken(user: Partial<User>) {
-    return await cacheService.get(
-      getTokenKey(user.email, TokenType.RefreshToken)
-    );
+  async getRefreshToken(email: string) {
+    return await cacheService.get(getTokenKey(email, TokenType.RefreshToken));
   }
 
   async getTokenPayload(token: string) {
     const payload = await jwt.verify(token, authConfig.jwtSecret);
 
     return payload as User & {
+      _id: string;
       exp: number;
+      iat: number;
     };
   }
 }
