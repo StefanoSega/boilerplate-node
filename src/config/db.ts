@@ -1,7 +1,7 @@
 import { DbConfig } from "~/db/dbTypes";
 
-export const dbConfig: DbConfig = {
+export const getDbConfig: () => DbConfig = () => ({
   host: "localhost",
   port: 27017,
   dbName: "test",
-};
+});

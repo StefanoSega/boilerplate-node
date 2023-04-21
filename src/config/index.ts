@@ -1,7 +1,7 @@
-import { authConfig } from "./auth";
-import { dbConfig } from "./db";
+import { getAuthConfig } from "./auth";
+import { getDbConfig } from "./db";
 
-export const config = {
-  auth: authConfig,
-  db: dbConfig,
-};
+export const getConfig = () => ({
+  auth: getAuthConfig(),
+  db: getDbConfig(),
+});

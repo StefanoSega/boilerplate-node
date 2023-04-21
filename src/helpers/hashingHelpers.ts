@@ -1,9 +1,12 @@
 import bcrypt from "bcrypt";
 
-import { authConfig } from "~/config/auth";
+import { getConfig } from "~/config";
 
-const hash = async (value: string) =>
-  await bcrypt.hash(value, authConfig.hashingSalt);
+const hash = async (value: string) => {
+  const config = getConfig().auth;
+
+  return await bcrypt.hash(value, config.hashingSalt);
+};
 
 const isHashingEqual = async (value: string, hashedValue: string) =>
   await bcrypt.compare(value, hashedValue);

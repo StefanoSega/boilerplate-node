@@ -1,4 +1,5 @@
 import { validationResult } from "express-validator";
+import passport from "passport";
 
 export const getValidationErrors = (req: any) => {
   const errorsAfterValidation = validationResult(req);
@@ -9,3 +10,6 @@ export const getValidationErrors = (req: any) => {
 
   return errorsAfterValidation.mapped();
 };
+
+export const routeAuthProtected = () =>
+  passport.authenticate("jwt", { session: false });

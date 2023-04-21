@@ -3,7 +3,6 @@ import omit from "lodash/omit";
 import passport from "passport";
 import { Strategy as JwtStrategy, ExtractJwt } from "passport-jwt";
 
-import { authConfig } from "~/config/auth";
 import { User } from "~/db/models/users";
 import { UsersRepository } from "~/db/repositories/usersRepository";
 import cacheService from "~/cache";
@@ -26,18 +25,21 @@ const getAccessToken = async (user: Partial<User>) =>
 
 class AuthService {
   private readonly usersRepository: UsersRepository;
+  private config: Record<string, any>;
 
   constructor() {
     this.usersRepository = new UsersRepository();
   }
 
-  init() {
+  init(config: Record<string, any>) {
+    this.config = config;
+
     // apply Passport Strategy
     passport.use(
       new JwtStrategy(
         {
           jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-          secretOrKey: authConfig.jwtSecret,
+          secretOrKey: this.config.jwtSecret,
         },
         async ({ email, exp, iat }, done) => {
           const isTokenExpired = new Date(exp * 1000) < new Date();
@@ -70,14 +72,14 @@ class AuthService {
   async generateAccessToken(user: Partial<User>) {
     const userData = omit(user, ["password", "exp", "jti", "iat"]);
 
-    const token = jwt.sign(userData, authConfig.jwtSecret, {
-      expiresIn: authConfig.accessTokenExpiresInMs,
+    const token = jwt.sign(userData, this.config.jwtSecret, {
+      expiresIn: this.config.accessTokenExpiresInMs,
     });
 
     await cacheService.set(
       getTokenKey(userData.email, TokenType.AccessToken),
       token,
-      authConfig.accessTokenExpiresInMs
+      this.config.accessTokenExpiresInMs
     );
 
     return token;
@@ -86,14 +88,14 @@ class AuthService {
   async generateRefreshToken(user: Partial<User>) {
     const userData = omit(user, "password");
 
-    const token = jwt.sign(userData, authConfig.jwtSecret, {
-      expiresIn: authConfig.refreshTokenExpiresInMs,
+    const token = jwt.sign(userData, this.config.jwtSecret, {
+      expiresIn: this.config.refreshTokenExpiresInMs,
     });
 
     await cacheService.set(
       getTokenKey(userData.email, TokenType.RefreshToken),
       token,
-      authConfig.refreshTokenExpiresInMs
+      this.config.refreshTokenExpiresInMs
     );
 
     return token;
@@ -104,7 +106,7 @@ class AuthService {
   }
 
   async getTokenPayload(token: string) {
-    const payload = await jwt.verify(token, authConfig.jwtSecret);
+    const payload = await jwt.verify(token, this.config.jwtSecret);
 
     return payload as User & {
       _id: string;

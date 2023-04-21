@@ -1,4 +1,4 @@
 import { MongoDbContext } from "./mongoDbContext";
-import { dbConfig } from "~/config/db";
+import { getConfig } from "~/config";
 
-export default new MongoDbContext(dbConfig);
+export default new MongoDbContext(getConfig().db);
